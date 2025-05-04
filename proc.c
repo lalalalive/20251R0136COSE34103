@@ -9,12 +9,11 @@
 
 #define MAX_SIZE NPROC
 struct proc *ready_queue[MAX_SIZE];
-
 int compare(struct proc * a, struct proc *b);
 void enqueue(struct proc *p);
 struct proc *dequeue(void);
 
-int ready_count = 0;
+int ready_cnt = 0;
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -564,31 +563,36 @@ setnice(int pid, int nice)
 }
 
 //////
-int compare(struct proc * a, struct proc *b){
-  if(a->priority != b->priority){
-    return a->priority - b->priority;
+int compare(struct proc * p1, struct proc *p2){
+  if(p1->priority != p2->priority){
+    return p1->priority - p2->priority;
   }
-  return b->pid - a->pid;
+  return p1->pid - p2->pid;
 }
 
 
 void enqueue(struct proc *p) {
-  if (ready_count >= MAX_SIZE) {
-    panic("ready_queue overflow!");
+  if (ready_cnt >= MAX_SIZE) {
+    panic("ready queue overflowed!");
   }
 
-  int i = ready_count;
+  int i = ready_cnt;
   while (i > 0 && compare(p, ready_queue[i - 1]) < 0) {
     ready_queue[i] = ready_queue[i - 1];
     i--;
   }
   ready_queue[i] = p;
-  ready_count++;
+  ready_cnt++;
 }
 
 struct proc *dequeue(void){
-  if(ready_count == 0){
+  if(ready_cnt == 0){
     return 0;
   }
-  return ready_queue[--ready_count];
+  struct proc *p = ready_queue[0];
+  for(int i = 1; i < ready_cnt; i++){
+    ready_queue[i-1] = ready_queue[i];
+  }
+  ready_cnt--;
+  return p;
 }
