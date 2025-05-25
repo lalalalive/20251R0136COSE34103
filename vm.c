@@ -328,16 +328,17 @@ copyuvm(pde_t *pgdir, uint sz)
       panic("copyuvm: pte should exist");
     if(!(*pte & PTE_P))
       panic("copyuvm: page not present");
+
+    *pte &= ~PTE_W;
+    pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
-    flags = flags & (~PTE_W);
-    if(mappages(d, (char*)i, PGSIZE, V2P(mem), flags) < 0) {
+    
+    if(mappages(d, (char*)i, PGSIZE, pa, flags) < 0) {
         goto bad;
     }
-    pa = PTE_ADDR(*pte);
-    inc_refcount(pa);
-    *pte = *pte & (~PTE_W);
-    lcr3(V2P(pgdir));
+    inc_refcount(pa); 
     }
+    lcr3(V2P(pgdir));
     return d;
     
   bad:
@@ -387,15 +388,33 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 
 void
 page_fault(void)
-{
-  uint va = rcr2();
-  if(va < 0) {
+{ pte_t *pte;
+  uint rc,pa;
+  uint va;
+  
+  if((va= rcr2())< 0) {
     panic("Invalid access");
     return;
   }
-  
+  pte = walkpgdir(myproc()->pgdir,(void*)va,0);
+  pa = PTE_ADDR(*pte);
+  rc = get_refcount(pa);
+  if(rc > 1){
+    char *mem;
+    if((mem=kalloc())==0)return;
+    memmove(mem,(char*)P2V(pa),PGSIZE);
+    *pte = V2P(mem) | PTE_P | PTE_U | PTE_W;
+    dec_refcount(pa);
+    cprintf("rc: %d, pa: 0x%x\n", rc, pa);
+  }
+  else if(rc==1){
+     *pte |= PTE_W;
+    cprintf("rc: %d, pa: 0x%x\n", rc, pa);
+  }
+  lcr3(V2P(myproc()->pgdir));
   return;
 }
+
 
 //PAGEBREAK!
 // Blank page.

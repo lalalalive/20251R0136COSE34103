@@ -24,6 +24,7 @@ struct {
 } kmem;
 
 struct {
+
   int num_free_pages;
   uint refcount[PHYSTOP >> PGSHIFT];
 } pmem;
@@ -55,8 +56,11 @@ freerange(void *vstart, void *vend)
 {
   char *p;
   p = (char*)PGROUNDUP((uint)vstart);
-  for(; p + PGSIZE <= (char*)vend; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)vend; p += PGSIZE){
+    pmem.refcount[V2P(p)>>PGSHIFT]=0;
+    //refernce count initializing
     kfree(p);
+  }
 }
 //PAGEBREAK: 21
 // Free the page of physical memory pointed at by v,
@@ -71,16 +75,21 @@ kfree(char *v)
   if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(v, 1, PGSIZE);
+  
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
-  r = (struct run*)v;
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-
-  pmem.num_free_pages++;
+  if(get_refcount(V2P(v)) > 0){
+    dec_refcount(V2P(v));
+  }
+  if(get_refcount(V2P(v)) == 0){
+    // Fill with junk to catch dangling refs.
+    memset(v, 1, PGSIZE);
+    pmem.num_free_pages++;
+    r = (struct run*)v;
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+  }
 
   if(kmem.use_lock)
     release(&kmem.lock);
@@ -96,16 +105,18 @@ kalloc(void)
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
-
   pmem.num_free_pages--;
-
+  r = kmem.freelist;
+  if(r){
+    kmem.freelist = r->next;
+    pmem.refcount[V2P((char*)r) >> PGSHIFT] = 1; 
+   
+  }
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;
 }
+
 
 int
 freemem(void)
@@ -116,29 +127,20 @@ freemem(void)
 uint
 get_refcount(uint pa)
 {
-  if(pa > PHYSTOP || pa % PGSIZE != 0)
-     panic('Invlaid physical address!');
- 
-  return pmem.refcount[pa >> PGSHIFT];
+  
+  uint count = pmem.refcount[pa >> PGSHIFT];
+  return count;
 }
 
 void
 inc_refcount(uint pa)
 {
-  if(pa > PHYSTOP || pa % PGSIZE != 0)
-    panic('Invlaid physical address!');
-  pmem.refcount[pa >> PGSHIFT]++;
+  ++pmem.refcount[pa >> PGSHIFT];
 }
 
 void  
 dec_refcount(uint pa)
 {
-  if(pa > PHYSTOP || pa % PGSIZE != 0)
-    panic('Invlaid physical address!');
-  uint index = pa >> PGSHIFT;
-  if(pmem.refcount[index] == 0)
-    panic("dec_refcount: refcount already zero");
-  pmem.refcount[index]--;
-  if(pmem.refcount[index] == 0)
-    kfree(P2V(pa));
+  --pmem.refcount[pa >> PGSHIFT];
 }
+
